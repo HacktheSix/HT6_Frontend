@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import Link from "next/link";
 import {
   EyeIcon,
@@ -19,6 +19,26 @@ export default function SignInPage() {
   const [showPassword, setShowPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [rememberMe, setRememberMe] = useState(false);
+  const [checkingAuth, setCheckingAuth] = useState(true);
+
+  // Check if user is already authenticated
+  useEffect(() => {
+    try {
+      const storedAuth = localStorage.getItem('dashboard_auth');
+      if (storedAuth) {
+        const userData = JSON.parse(storedAuth);
+        if (userData && userData.auth && userData.name && userData.email) {
+          // User is already authenticated, redirect to dashboard
+          window.location.href = '/dashboard';
+          return;
+        }
+      }
+    } catch (error) {
+      console.error('Error checking stored auth:', error);
+      localStorage.removeItem('dashboard_auth');
+    }
+    setCheckingAuth(false);
+  }, []);
 
   const handleSignIn = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -27,6 +47,23 @@ export default function SignInPage() {
     // Redirect to Auth0-enabled backend for authentication
     window.location.href = "http://localhost:3001";
   };
+
+  // Show loading screen while checking authentication
+  if (checkingAuth) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-purple-50 dark:from-gray-900 dark:via-gray-800 dark:to-gray-900 flex items-center justify-center py-12 px-4 sm:px-6 lg:px-8">
+        <div className="text-center">
+          <div className="w-12 h-12 border-4 border-blue-500 border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
+          <h2 className="text-xl font-semibold text-gray-900 dark:text-white mb-2">
+            Checking Authentication
+          </h2>
+          <p className="text-gray-600 dark:text-gray-400">
+            Please wait...
+          </p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-purple-50 dark:from-gray-900 dark:via-gray-800 dark:to-gray-900 flex items-center justify-center py-12 px-4 sm:px-6 lg:px-8">

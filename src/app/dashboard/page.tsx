@@ -22,6 +22,7 @@ import {
 } from "@heroicons/react/24/outline";
 import { ChartContainer, MetricCard } from "@/components/ChartCard";
 import { useRealTimeStats } from "@/hooks/useRealTimeStats";
+import { useSupabase } from "@/hooks/useSupabase";
 import {
   Chart as ChartJS,
   CategoryScale,
@@ -79,6 +80,94 @@ interface SustainabilityMetrics {
 
 export default function DashboardPage() {
   const [timeRange, setTimeRange] = useState("7d");
+  const [user, setUser] = useState<{name: string, email: string, picture: string, auth: boolean, auth0_id?: string} | null>(null);
+  const [authChecked, setAuthChecked] = useState(false);
+  const [redirecting, setRedirecting] = useState(false);
+  
+  // Initialize Supabase hook
+  const { user: supabaseUser, loading: supabaseLoading, connected, loadUser, getUserStats } = useSupabase();
+  const [userStats, setUserStats] = useState<any>(null);
+
+  // Check for authentication parameters from Auth0 redirect and persist them
+  useEffect(() => {
+    const urlParams = new URLSearchParams(window.location.search);
+    const name = urlParams.get('name');
+    const email = urlParams.get('email');
+    const picture = urlParams.get('picture');
+    const auth = urlParams.get('auth');
+    const auth0_id = urlParams.get('auth0_id');
+
+    // Check for Auth0 redirect parameters
+    if (auth === 'true' && name && email) {
+      const userData = { name, email, picture: picture || '', auth: true, auth0_id: auth0_id || '' };
+      setUser(userData);
+      
+      // Persist authentication to localStorage
+      localStorage.setItem('dashboard_auth', JSON.stringify(userData));
+      
+      // Load user data from Supabase if auth0_id is available
+      if (auth0_id) {
+        loadUser(auth0_id);
+      }
+      
+      // Clean up URL parameters
+      window.history.replaceState({}, document.title, window.location.pathname);
+      setAuthChecked(true);
+    } else {
+      // Check for existing authentication in localStorage
+      try {
+        const storedAuth = localStorage.getItem('dashboard_auth');
+        if (storedAuth) {
+          const userData = JSON.parse(storedAuth);
+          // Validate stored data
+          if (userData && userData.auth && userData.name && userData.email) {
+            setUser(userData);
+            if (userData.auth0_id) {
+              loadUser(userData.auth0_id);
+            }
+            setAuthChecked(true);
+          } else {
+            // Invalid stored data, clear it
+            localStorage.removeItem('dashboard_auth');
+            setAuthChecked(true);
+          }
+        } else {
+          setAuthChecked(true);
+        }
+      } catch (error) {
+        console.error('Error checking stored auth:', error);
+        localStorage.removeItem('dashboard_auth');
+        setAuthChecked(true);
+      }
+    }
+  }, [loadUser]);
+
+  // Redirect unauthenticated users to sign-in page
+  useEffect(() => {
+    if (authChecked && !user?.auth && !redirecting) {
+      setRedirecting(true);
+      // Small delay to allow for loading states
+      setTimeout(() => {
+        window.location.href = '/signin';
+      }, 1000);
+    }
+  }, [authChecked, user, redirecting]);
+
+  // Logout function
+  const handleLogout = () => {
+    localStorage.removeItem('dashboard_auth');
+    setUser(null);
+    window.location.href = '/signin';
+  };
+
+  // Load user statistics from Supabase
+  useEffect(() => {
+    const loadStats = async () => {
+      const stats = await getUserStats();
+      setUserStats(stats);
+    };
+    loadStats();
+  }, [getUserStats]);
 
   // Use real-time stats hook
   const { data: realTimeData, loading, error, lastUpdated, refresh } = useRealTimeStats({
@@ -251,6 +340,39 @@ export default function DashboardPage() {
 
   return (
     <div className="min-h-screen bg-gray-50 dark:bg-gray-900 py-8">
+      {/* Loading screen while checking authentication */}
+      {!authChecked && (
+        <div className="fixed inset-0 bg-gray-50 dark:bg-gray-900 flex items-center justify-center z-50">
+          <div className="text-center">
+            <div className="w-12 h-12 border-4 border-blue-500 border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
+            <h2 className="text-xl font-semibold text-gray-900 dark:text-white mb-2">
+              Checking Authentication
+            </h2>
+            <p className="text-gray-600 dark:text-gray-400">
+              Please wait while we verify your credentials...
+            </p>
+          </div>
+        </div>
+      )}
+
+      {/* Redirect screen for unauthenticated users */}
+      {authChecked && !user?.auth && (
+        <div className="fixed inset-0 bg-gray-50 dark:bg-gray-900 flex items-center justify-center z-50">
+          <div className="text-center">
+            <div className="w-12 h-12 border-4 border-red-500 border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
+            <h2 className="text-xl font-semibold text-gray-900 dark:text-white mb-2">
+              Access Denied
+            </h2>
+            <p className="text-gray-600 dark:text-gray-400 mb-4">
+              You need to sign in to access the dashboard.
+            </p>
+            <p className="text-sm text-gray-500 dark:text-gray-500">
+              Redirecting to sign-in page...
+            </p>
+          </div>
+        </div>
+      )}
+
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="mb-8">
           <div className="flex items-center justify-between">
@@ -263,6 +385,15 @@ export default function DashboardPage() {
               </p>
             </div>
             <div className="flex items-center space-x-4">
+              {/* Logout button */}
+              <button
+                onClick={handleLogout}
+                className="px-3 py-2 text-sm bg-red-600 text-white rounded-md hover:bg-red-700 transition-colors flex items-center space-x-2"
+                title="Sign out"
+              >
+                <span>Sign Out</span>
+              </button>
+              
               <div className="flex items-center space-x-2">
                 <div className={`w-2 h-2 rounded-full animate-pulse ${
                   realTimeData ? 'bg-green-500' : 'bg-yellow-500'
@@ -286,6 +417,47 @@ export default function DashboardPage() {
             </div>
           </div>
         </div>
+
+        {/* Welcome message for authenticated users */}
+        {user && user.auth && (
+          <div className="mb-6 bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-lg p-4 animate-slide-up">
+            <div className="flex items-center space-x-3">
+              {user.picture && (
+                <img 
+                  src={user.picture} 
+                  alt={user.name}
+                  className="w-10 h-10 rounded-full border-2 border-green-300"
+                />
+              )}
+              <div className="flex-1">
+                <h3 className="text-lg font-semibold text-green-800 dark:text-green-200">
+                  Welcome back, {user.name}! 🎉
+                </h3>
+                <p className="text-sm text-green-600 dark:text-green-300">
+                  Successfully signed in as {user.email}
+                </p>
+                <div className="mt-2 flex items-center space-x-4 text-xs">
+                  <span className={`flex items-center ${connected ? 'text-green-600' : 'text-yellow-600'}`}>
+                    <WifiIcon className="w-3 h-3 mr-1" />
+                    Database: {connected ? 'Connected' : 'Connecting...'}
+                  </span>
+                  {supabaseUser && (
+                    <span className="text-green-600">
+                      <CheckCircleIcon className="w-3 h-3 mr-1 inline" />
+                      Profile Synced
+                    </span>
+                  )}
+                  {userStats && (
+                    <span className="text-blue-600">
+                      <UserGroupIcon className="w-3 h-3 mr-1 inline" />
+                      {userStats.totalUsers} Total Users
+                    </span>
+                  )}
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* Error display */}
         {error && (
@@ -399,6 +571,57 @@ export default function DashboardPage() {
             <p className="text-xs text-gray-500 dark:text-gray-500 mt-1">
               vs last month
             </p>
+          </div>
+
+          {/* Supabase User Statistics Card */}
+          <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-xl border border-gray-200 dark:border-gray-700 p-6 hover:shadow-2xl transition-all duration-300 animate-slide-up-delay-5">
+            <div className="flex items-center justify-between mb-4">
+              <div className="flex items-center">
+                <div className="w-8 h-8 bg-gradient-to-br from-blue-500 to-cyan-600 rounded-lg flex items-center justify-center mr-3">
+                  <UserGroupIcon className="w-4 h-4 text-white" />
+                </div>
+                <h3 className="text-sm font-medium text-gray-700 dark:text-gray-300">
+                  Platform Users
+                </h3>
+              </div>
+              <div className="flex items-center text-sm font-medium text-blue-600">
+                {loading ? (
+                  <div className="w-3 h-3 border border-blue-500 border-t-transparent rounded-full animate-spin"></div>
+                ) : (
+                  <>
+                    <ArrowTrendingUpIcon className="h-4 w-4 text-blue-500" />
+                    <span className="ml-1">Active</span>
+                  </>
+                )}
+              </div>
+            </div>
+            <div className="mb-4">
+              {loading ? (
+                <div className="flex items-center space-x-2">
+                  <div className="w-6 h-6 border-2 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
+                  <p className="text-lg text-gray-500 dark:text-gray-400">Loading...</p>
+                </div>
+              ) : (
+                <p className="text-2xl font-bold text-blue-700 dark:text-blue-300 break-words">
+                  {userStats?.totalUsers || 0}
+                </p>
+              )}
+            </div>
+            {!loading && userStats && (
+              <>
+                <p className="text-sm text-gray-600 dark:text-gray-400">
+                  {userStats.verifiedUsers} verified users
+                </p>
+                <p className="text-xs text-gray-500 dark:text-gray-500 mt-1">
+                  {userStats.recentUsers} joined this week
+                </p>
+              </>
+            )}
+            {!loading && !userStats && (
+              <p className="text-sm text-red-500 font-medium">
+                Database disconnected
+              </p>
+            )}
           </div>
         </div>
 
